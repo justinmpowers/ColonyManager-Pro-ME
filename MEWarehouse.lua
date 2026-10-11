@@ -1974,11 +1974,19 @@ end
     @return table
 ]]
 function createColonistData(colonist)
+  -- Some requests have no target (nil) or, depending on the AP/MineColonies version, a table
+  if type(colonist) == "table" then
+    colonist = colonist.name or colonist.fullName
+  end
+  if type(colonist) ~= "string" or colonist == "" then
+    colonist = "Unknown"
+  end
+
   title_words = {}
   words_in_name = 0
   colonist_job = ""
   word_count = 1
-  
+
   for word in colonist:gmatch("%S+") do
     table.insert(title_words, word)
     words_in_name = words_in_name + 1
@@ -1989,7 +1997,7 @@ function createColonistData(colonist)
 
   repeat
     if colonist_job ~= "" then colonist_job = colonist_job .. " " end
-    colonist_job = colonist_job .. title_words[word_count]
+    colonist_job = colonist_job .. (title_words[word_count] or "")
     word_count = word_count + 1
   until word_count > words_in_name - 3
   
@@ -2020,9 +2028,9 @@ function getWorkRequestList(colony)
     
     for w in pairs(workRequests) do
         writeToLog(workRequests[w], "--- Citizen Request start ---", "--- Citizen Request end ---")
-        name = workRequests[w].name
+        name = workRequests[w].name or "Unknown"
         colonist = createColonistData(workRequests[w].target)
-        desc = workRequests[w].desc
+        desc = workRequests[w].desc or ""
         item = {}
         
         if workRequests[w].items and workRequests[w].items[1] then
