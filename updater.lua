@@ -69,8 +69,10 @@ local function getLatestCommitSHA(repo, branch)
 end
 
 -- Download a file from GitHub raw content
-local function downloadFile(repo, branch, filename)
-    local url = "https://raw.githubusercontent.com/" .. repo .. "/" .. branch .. "/" .. filename
+-- ref should be a commit SHA when known: raw branch URLs are cached for several
+-- minutes, so downloading by branch right after a push can fetch the old file
+local function downloadFile(repo, ref, filename)
+    local url = "https://raw.githubusercontent.com/" .. repo .. "/" .. ref .. "/" .. filename
     
     local response = http.get(url)
     if response then
@@ -154,7 +156,7 @@ function checkForUpdates()
     
     for _, filename in ipairs(files) do
         term.write("  " .. filename .. "... ")
-        if downloadFile(repo, branch, filename) then
+        if downloadFile(repo, latestSHA, filename) then
             printColor("OK", colors.green)
         else
             printColor("FAILED", colors.red)
@@ -171,11 +173,9 @@ function checkForUpdates()
         return true
     else
         printColor("[!] Update partially failed", colors.orange)
-        printColor("    Some files may need manual update", colors.gray)
-        -- Still save version to avoid repeated failed attempts
-        saveVersion(latestSHA)
+        printColor("    Will retry on next boot", colors.gray)
         printColor("========================================", colors.cyan)
-        return true
+        return false
     end
 end
 
@@ -198,7 +198,7 @@ function forceUpdate()
     
     for _, filename in ipairs(files) do
         print("  Downloading " .. filename .. "...")
-        if downloadFile(repo, branch, filename) then
+        if downloadFile(repo, latestSHA or branch, filename) then
             print("    OK")
         else
             print("    FAILED")
