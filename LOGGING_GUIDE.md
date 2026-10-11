@@ -1,14 +1,14 @@
-# RSWarehouse Logging Guide
+# MEWarehouse Logging Guide
 
 ## Overview
-The RSWarehouse script includes comprehensive logging to help troubleshoot issues with work request fulfillment, RS Bridge exports, and autocrafting operations.
+The MEWarehouse script includes comprehensive logging to help troubleshoot issues with work request fulfillment, ME Bridge exports, and autocrafting operations.
 
 ---
 
 ## Log File Location
 
-**File:** `RSWarehouse.log`  
-**Location:** Same directory as the RSWarehouse.lua script (typically the root of your computer in ComputerCraft)
+**File:** `MEWarehouse.log`  
+**Location:** Same directory as the MEWarehouse.lua script (typically the root of your computer in ComputerCraft)
 
 ---
 
@@ -16,7 +16,7 @@ The RSWarehouse script includes comprehensive logging to help troubleshoot issue
 
 ### Method 1: Using the `edit` Command (In-Game)
 ```lua
-edit RSWarehouse.log
+edit MEWarehouse.log
 ```
 - Opens the log file in CC:Tweaked's text editor
 - Use arrow keys to scroll through entries
@@ -24,7 +24,7 @@ edit RSWarehouse.log
 
 ### Method 2: Using the `cat` Command (In-Game)
 ```lua
-cat RSWarehouse.log
+cat MEWarehouse.log
 ```
 - Displays the entire log file contents in the terminal
 - Good for quick viewing of recent logs
@@ -33,7 +33,7 @@ cat RSWarehouse.log
 ### Method 3: View Recent Entries with `tail`
 Many CC:Tweaked systems have a tail-like function. If not available, you can create a simple viewer:
 ```lua
-local f = fs.open("RSWarehouse.log", "r")
+local f = fs.open("MEWarehouse.log", "r")
 local content = f.readAll()
 f.close()
 print(content:sub(-2000)) -- Last 2000 characters
@@ -41,12 +41,12 @@ print(content:sub(-2000)) -- Last 2000 characters
 
 ### Method 4: Copy to Another Computer
 ```lua
--- On the RSWarehouse computer:
+-- On the MEWarehouse computer:
 -- Insert a disk
-fs.copy("RSWarehouse.log", "disk/RSWarehouse.log")
+fs.copy("MEWarehouse.log", "disk/MEWarehouse.log")
 
 -- On another computer with the disk:
-edit disk/RSWarehouse.log
+edit disk/MEWarehouse.log
 ```
 
 ---
@@ -73,11 +73,11 @@ Each log entry follows this format:
 ### Startup
 ```
 ================================================================================
-RSWarehouse started - Day X at HH:MM
+MEWarehouse started - Day X at HH:MM
 Advanced Peripherals 0.7 Compatible
 ================================================================================
 [Day X HH:MM] [INFO] Monitor initialized successfully
-[Day X HH:MM] [INFO] RS Bridge initialized successfully
+[Day X HH:MM] [INFO] ME Bridge initialized successfully
 [Day X HH:MM] [INFO] Colony Integrator initialized successfully
   Data: {inColony=true}
 ```
@@ -105,7 +105,7 @@ Advanced Peripherals 0.7 Compatible
 [Day X HH:MM] [INFO] Request fully satisfied from storage
   Data: {item="Oak Wood", provided=64}
 ```
-**Meaning:** Successfully exported 64 Oak Wood from RS storage.
+**Meaning:** Successfully exported 64 Oak Wood from ME storage.
 **Monitor Color:** 🟢 GREEN
 
 ---
@@ -147,7 +147,7 @@ Advanced Peripherals 0.7 Compatible
 ```
 **Meaning:** No Diamonds in storage AND no crafting pattern configured.
 **Monitor Color:** 🔴 RED
-**Action Required:** Add Diamonds to RS system or create a pattern.
+**Action Required:** Add Diamonds to ME system or create a pattern.
 
 ---
 
@@ -195,13 +195,13 @@ Advanced Peripherals 0.7 Compatible
 
 ---
 
-### Issue: "RS Bridge not found"
+### Issue: "ME Bridge not found"
 **Log Entry:**
 ```
-[ERROR] RS Bridge not found - ensure peripheral is connected
+[ERROR] ME Bridge not found - ensure peripheral is connected
 ```
 **Solution:** 
-1. Check that RS Bridge block is placed and connected
+1. Check that ME Bridge block is placed and connected
 2. Verify Advanced Peripherals mod is installed (version 0.7)
 3. Ensure peripheral name is `rs_bridge` (not `rsBridge`)
 
@@ -223,9 +223,9 @@ Advanced Peripherals 0.7 Compatible
   Data: {item="...", error="..."}
 ```
 **Common Errors:**
-- `ITEM_NOT_FOUND`: Item not in RS system
+- `ITEM_NOT_FOUND`: Item not in ME system
 - `NO_SPACE`: Target inventory is full
-- `UNKNOWN`: Check RS Bridge placement and connection
+- `UNKNOWN`: Check ME Bridge placement and connection
 
 ---
 
@@ -236,9 +236,9 @@ Advanced Peripherals 0.7 Compatible
   Data: {item="...", error="..."}
 ```
 **Common Errors:**
-- `pattern not found` or `NO_PATTERN`: No crafting pattern configured in RS
+- `pattern not found` or `NO_PATTERN`: No crafting pattern configured in ME
 - `NO_INGREDIENTS`: Pattern exists but missing crafting materials
-- Check RS system has the pattern and required materials
+- Check ME system has the pattern and required materials
 
 ---
 
@@ -247,21 +247,21 @@ Advanced Peripherals 0.7 Compatible
 ### Clearing Old Logs
 The log file appends data, so it will grow over time. To clear it:
 ```lua
-fs.delete("RSWarehouse.log")
+fs.delete("MEWarehouse.log")
 -- Restart the script to create a fresh log
 ```
 
 ### Viewing Log Size
 ```lua
-print("Log size: " .. fs.getSize("RSWarehouse.log") .. " bytes")
+print("Log size: " .. fs.getSize("MEWarehouse.log") .. " bytes")
 ```
 
 ### Creating a Backup
 ```lua
 -- Before clearing, backup old logs
 local date = os.day()
-fs.copy("RSWarehouse.log", "RSWarehouse_backup_day" .. date .. ".log")
-fs.delete("RSWarehouse.log")
+fs.copy("MEWarehouse.log", "MEWarehouse_backup_day" .. date .. ".log")
+fs.delete("MEWarehouse.log")
 ```
 
 ---
@@ -292,8 +292,8 @@ end
 while true do
   term.clear()
   term.setCursorPos(1, 1)
-  print("=== RSWarehouse Live Logs ===")
-  tail("RSWarehouse.log", 15)
+  print("=== MEWarehouse Live Logs ===")
+  tail("MEWarehouse.log", 15)
   sleep(5)
 end
 ```
@@ -310,8 +310,8 @@ end
 - **`exported`** / **`provided`**: Quantity delivered
 - **`hasNBT`**: Whether item has special data (enchantments, etc.)
 - **`colonist`**: Name and job of the requesting citizen
-- **`error`**: Error message from RS Bridge or Colony Integrator
-- **`jobId`**: Crafting job ID for tracking in RS system
+- **`error`**: Error message from ME Bridge or Colony Integrator
+- **`jobId`**: Crafting job ID for tracking in ME system
 
 ---
 
@@ -331,8 +331,8 @@ If you encounter issues not covered in this guide:
 1. Check the full log file for ERROR and WARN entries
 2. Note the specific error messages
 3. Verify all peripherals are connected (monitor, rs_bridge, colony_integrator)
-4. Ensure RS system has patterns and materials
-5. Check that items are within the RS system's reach
+4. Ensure ME system has patterns and materials
+5. Check that items are within the ME system's reach
 
 ---
 

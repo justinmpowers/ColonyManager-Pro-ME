@@ -1,6 +1,6 @@
--- ColonyManager-Pro-RS Startup Script
+-- ColonyManager-Pro-ME Startup Script
 -- Auto-generated startup file for boot configuration
--- This file runs ColonyManager-Pro-RS on computer boot with auto-update checking
+-- This file runs ColonyManager-Pro-ME on computer boot with auto-update checking
 
 local VERSION = "2.0.0"
 
@@ -8,8 +8,8 @@ local VERSION = "2.0.0"
 term.clear()
 term.setCursorPos(1, 1)
 print("========================================")
-print("  ColonyManager-Pro-RS v" .. VERSION)
-print("  MineColonies + Refined Storage")
+print("  ColonyManager-Pro-ME v" .. VERSION)
+print("  MineColonies + Applied Energistics 2")
 print("========================================")
 print("")
 
@@ -43,7 +43,7 @@ print("")
 
 -- Verify required files exist
 local requiredFiles = {
-    "RSWarehouse.lua"
+    "MEWarehouse.lua"
 }
 
 local missingFiles = {}
@@ -68,18 +68,18 @@ if #missingFiles > 0 then
 end
 
 -- Start the main program
-print("Starting ColonyManager-Pro-RS...")
+print("Starting ColonyManager-Pro-ME...")
 sleep(1)
 
 -- Run in protected mode to catch errors
 local success, err = pcall(function()
-    shell.run("RSWarehouse.lua")
+    shell.run("MEWarehouse.lua")
 end)
 
 if not success then
     print("")
     print("========================================")
-    print("ColonyManager-Pro-RS crashed!")
+    print("ColonyManager-Pro-ME crashed!")
     print("========================================")
     print("Error: " .. tostring(err))
     print("")

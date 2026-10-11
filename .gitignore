@@ -1,4 +1,4 @@
-# RSWarehouse .gitignore
+# MEWarehouse .gitignore
 
 # Log files
 *.log
@@ -6,7 +6,7 @@
 
 # Runtime files (user-specific)
 excluded_items.txt
-.rswarehouse_version
+.mewarehouse_version
 .pending_crafts
 .exported_items
 

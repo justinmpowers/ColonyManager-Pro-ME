@@ -1,7 +1,7 @@
--- ColonyManager-Pro-RS Auto-Updater
+-- ColonyManager-Pro-ME Auto-Updater
 -- Checks GitHub for newer commits and updates if available
 
-local VERSION_FILE = ".rswarehouse_version"
+local VERSION_FILE = ".mewarehouse_version"
 local CONFIG_FILE = "config.lua"
 
 -- Helper for colored terminal output
@@ -23,7 +23,7 @@ local function loadConfig()
     end
     -- Default config if file doesn't exist
     return {
-        github_repo = "YOUR_GITHUB_USERNAME/RSWarehouse",
+        github_repo = "YOUR_GITHUB_USERNAME/MEWarehouse",
         github_branch = "main"
     }
 end
@@ -52,7 +52,7 @@ local function getLatestCommitSHA(repo, branch)
     
     local headers = {
         ["Accept"] = "application/vnd.github.v3+json",
-        ["User-Agent"] = "ComputerCraft-RSWarehouse"
+        ["User-Agent"] = "ComputerCraft-MEWarehouse"
     }
     
     local response = http.get(url, headers)
@@ -98,7 +98,7 @@ end
 local function getFileList(repo, branch)
     -- Default files to update (config.lua is NOT updated to preserve user settings)
     return {
-        "RSWarehouse.lua",
+        "MEWarehouse.lua",
         "updater.lua"
     }
 end
@@ -109,7 +109,7 @@ function checkForUpdates()
     local repo = config.github_repo
     local branch = config.github_branch or "main"
     
-    if repo == "YOUR_GITHUB_USERNAME/RSWarehouse" then
+    if repo == "YOUR_GITHUB_USERNAME/MEWarehouse" then
         printColor("[!] Update check skipped: Configure github_repo in config.lua", colors.orange)
         return false
     end
@@ -185,7 +185,7 @@ function forceUpdate()
     local repo = config.github_repo
     local branch = config.github_branch or "main"
     
-    if repo == "YOUR_GITHUB_USERNAME/RSWarehouse" then
+    if repo == "YOUR_GITHUB_USERNAME/MEWarehouse" then
         print("Update failed: Configure github_repo in config.lua")
         return false
     end

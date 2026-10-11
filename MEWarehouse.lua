@@ -1,9 +1,9 @@
--- RSWarehouse.lua
+-- MEWarehouse.lua
 -- Updated for Advanced Peripherals 0.7: 2025-01-06
 -- GitHub Auto-Update Support Added: 2026-01-08
 
 local VERSION = "2.0.0"
-local VERSION_FILE = ".rswarehouse_version"
+local VERSION_FILE = ".mewarehouse_version"
 
 -- Load configuration from config.lua
 local function loadConfig()
@@ -18,8 +18,8 @@ end
 
 local userConfig = loadConfig()
 
-local logFile = "RSWarehouse.log"
-local logFileBackup = "RSWarehouse.log.bak"
+local logFile = "MEWarehouse.log"
+local logFileBackup = "MEWarehouse.log.bak"
 local time_between_runs = (userConfig and userConfig.time_between_runs) or 15
 local SCAN_AT_NIGHT = (userConfig and userConfig.scan_at_night ~= nil) and userConfig.scan_at_night or true
 local logHandle = nil
@@ -187,7 +187,7 @@ local function initializeLogging()
     if logHandle then
       logHandle.write("\n")
       logHandle.write("================================================================================\n")
-      logHandle.write(string.format("RSWarehouse started - Day %d at %s\n", os.day(), textutils.formatTime(os.time(), true)))
+      logHandle.write(string.format("MEWarehouse started - Day %d at %s\n", os.day(), textutils.formatTime(os.time(), true)))
       logHandle.write("Advanced Peripherals 0.7 Compatible\n")
       logHandle.write("================================================================================\n")
       logHandle.flush()
@@ -246,15 +246,16 @@ monitor.setCursorBlink(false)
 print("Monitor initialized.")
 logMessage("INFO", "Monitor initialized successfully")
  
--- Initialize RS Bridge
--- see: https://docs.advanced-peripherals.de/0.7/peripherals/rs_bridge/
-local bridge = peripheral.find("rs_bridge")
+-- Initialize ME Bridge
+-- see: https://docs.advanced-peripherals.de/0.7/peripherals/me_bridge/
+-- Peripheral type is "meBridge" in Advanced Peripherals 0.7.x and "me_bridge" in 0.8+
+local bridge = peripheral.find("me_bridge") or peripheral.find("meBridge")
 if not bridge then 
-  logMessage("ERROR", "RS Bridge not found - ensure peripheral is connected")
-  error("RS Bridge not found.") 
+  logMessage("ERROR", "ME Bridge not found - ensure peripheral is connected")
+  error("ME Bridge not found.") 
 end
-print("RS Bridge initialized.")
-logMessage("INFO", "RS Bridge initialized successfully")
+print("ME Bridge initialized.")
+logMessage("INFO", "ME Bridge initialized successfully")
 
 -- Initialize Colony Integrator
 -- see: https://docs.advanced-peripherals.de/0.7/peripherals/colony_integrator/
@@ -286,7 +287,7 @@ end
 -- where the entanglement block is sitting. Default to empty string.
 local storage = "Right"
 if not storage then error("Warehouse storage not found.") end
-local direction = "back"
+local direction = (userConfig and userConfig.storage_direction) or "back"
 print("Warehouse storage initialized.")
 
 ----------------------------------------------------------------------------
@@ -352,7 +353,7 @@ end
 ]]
 local function saveExcludedItems()
     local file = fs.open(EXCLUDED_FILE, "w")
-    file.write("# RSWarehouse Excluded Items\n")
+    file.write("# MEWarehouse Excluded Items\n")
     file.write("# Add one item name per line\n")
     file.write("# Lines starting with # are comments\n\n")
     
@@ -621,12 +622,12 @@ local function getTotalPendingCount()
 end
 
 --[[
-    Get RS Inventory Count
-    @desc   Check how many of an item are currently in the RS system
+    Get ME Inventory Count
+    @desc   Check how many of an item are currently in the ME system
     @param  itemName - The item name to check (e.g., "minecraft:oak_log")
-    @return number - Count of items in RS system
+    @return number - Count of items in ME system
 ]]
-local function getRSInventoryCount(itemName)
+local function getMEInventoryCount(itemName)
     if not bridge then return 0 end
     
     local success, result = pcall(function()
@@ -641,6 +642,35 @@ local function getRSInventoryCount(itemName)
         end
     end
     return 0
+end
+
+--[[
+    Request Craft
+    @desc   Ask the ME system to craft an item. ME crafting needs both a pattern and a
+            free Crafting CPU, so a failed request is checked against isItemCraftable
+            to tell "no pattern" apart from "no CPU available".
+    @param  craftFilter - Item filter ({ name, count, nbt })
+    @return string - "scheduled", "no_pattern", "busy" or "error"
+    @return string|nil - Error message when the peripheral call failed
+]]
+local function requestCraft(craftFilter)
+    local success, result, err = pcall(function() return bridge.craftItem(craftFilter) end)
+    if not success then
+        return "error", tostring(result)
+    end
+    -- AP 0.7 returns true; newer versions may return a crafting job table
+    if result == true or type(result) == "table" then
+        return "scheduled"
+    end
+
+    local okCraftable, craftable = pcall(function()
+        return bridge.isItemCraftable({ name = craftFilter.name, nbt = craftFilter.nbt })
+    end)
+    if okCraftable and craftable then
+        logMessage("WARN", "ME craft not started - pattern exists but no Crafting CPU is free", { item = craftFilter.name, error = err })
+        return "busy"
+    end
+    return "no_pattern"
 end
 
 --[[
@@ -851,14 +881,14 @@ end
 
 --[[
     Calculate True Deficit
-    @desc   Calculate how many items are truly needed after accounting for RS inventory and pending crafts
+    @desc   Calculate how many items are truly needed after accounting for ME inventory and pending crafts
     @param  itemName - The item name
     @param  needed - How many the colony request needs
     @return number - True deficit that needs to be crafted
 ]]
 local function calculateTrueDeficit(itemName, needed)
-    -- Check what's already in RS system
-    local inRS = getRSInventoryCount(itemName)
+    -- Check what's already in ME system
+    local inME = getMEInventoryCount(itemName)
     
     -- Check what's already pending in crafts
     local pending = getPendingCraftCount(itemName)
@@ -867,7 +897,7 @@ local function calculateTrueDeficit(itemName, needed)
     local exported = getExportedItemCount(itemName)
     
     -- Calculate true deficit
-    local available = inRS + pending + exported
+    local available = inME + pending + exported
     local deficit = needed - available
     
     if deficit < 0 then deficit = 0 end
@@ -875,7 +905,7 @@ local function calculateTrueDeficit(itemName, needed)
     logMessage("DEBUG", "Calculated true deficit", { 
         item = itemName, 
         needed = needed, 
-        inRS = inRS, 
+        inME = inME, 
         pending = pending,
         exported = exported,
         deficit = deficit 
@@ -1163,7 +1193,7 @@ end
     Try Smart Tool Fulfillment
     @desc   Attempt to fulfill a tool request with the cheapest acceptable option
     @param  request - The work request data
-    @param  bridge - RS Bridge peripheral
+    @param  bridge - ME Bridge peripheral
     @param  direction - Export direction
     @return number - Amount provided
 ]]
@@ -1232,7 +1262,7 @@ end
     Try Smart Armor Fulfillment
     @desc   Attempt to fulfill an armor request with the cheapest acceptable option
     @param  request - The work request data
-    @param  bridge - RS Bridge peripheral
+    @param  bridge - ME Bridge peripheral
     @param  direction - Export direction
     @return number - Amount provided
 ]]
@@ -1692,7 +1722,7 @@ function displayPendingWarningPage(mon)
     row = row + 1
     mon.setTextColor(colors.white)
     mon.setCursorPos(4, row)
-    mon.write("1. RS Bridge output chest is connected")
+    mon.write("1. ME Bridge output chest is connected")
     row = row + 1
     mon.setCursorPos(4, row)
     mon.write("2. Items can flow to MineColonies warehouse")
@@ -1839,6 +1869,13 @@ function displayLegendPage(mon)
     mon.write("[!>]")
     mon.setTextColor(colors.white)
     mon.write(" - Partial fill, crafting failed")
+    row = row + 1
+    
+    mon.setCursorPos(2, row)
+    mon.setTextColor(colors.magenta)
+    mon.write("[CP]")
+    mon.setTextColor(colors.white)
+    mon.write(" - Waiting for a free Crafting CPU")
     row = row + 1
     
     mon.setCursorPos(2, row)
@@ -2118,6 +2155,9 @@ function displayList(mon, listName, itemList)
       elseif record.status == "partial_fail" then
           statusIcon = "[!>] "
           statusColor = colors.orange
+      elseif record.status == "waiting_cpu" then
+          statusIcon = "[CP] "
+          statusColor = colors.magenta
       elseif record.status == "manual" then
           statusIcon = "[??] "
           statusColor = colors.blue
@@ -2366,14 +2406,14 @@ function scanWorkRequests(mon, bridge, direction)
             
             -- If smart fulfillment didn't work or wasn't used, try normal export
             if provided == 0 then
-                -- Pre-export verification: Check if items still exist in RS
+                -- Pre-export verification: Check if items still exist in ME
                 -- User may have taken items between scan start and this export attempt
-                local currentInRS = 0
+                local currentInME = 0
                 if data.item and data.item.name then
-                    currentInRS = getRSInventoryCount(data.item.name)
+                    currentInME = getMEInventoryCount(data.item.name)
                 end
                 
-                if currentInRS > 0 then
+                if currentInME > 0 then
                     -- Items still available - proceed with export
                     -- Wrap exportItem in pcall to prevent crashes from peripheral disconnects
                     success, result, err = pcall(function() return bridge.exportItem(data.item, direction) end)
@@ -2395,8 +2435,8 @@ function scanWorkRequests(mon, bridge, direction)
                         end
                     end
                 else
-                    -- Items were removed from RS (user took them) - auto-craft needed amount
-                    logMessage("WARN", "Items no longer in RS - user may have taken them", { item = data.name, needed = data.needed })
+                    -- Items were removed from ME (user took them) - auto-craft needed amount
+                    logMessage("WARN", "Items no longer in ME - user may have taken them", { item = data.name, needed = data.needed })
                     
                     if data.item and data.item.name then
                         -- Calculate true deficit for the full amount needed
@@ -2408,20 +2448,24 @@ function scanWorkRequests(mon, bridge, direction)
                                 craftFilter.nbt = data.item.nbt
                             end
                             
-                            logMessage("INFO", "Auto-crafting items that were removed from RS", { item = data.name, count = trueDeficit })
-                            local craftSuccess, craftResult = pcall(function() return bridge.craftItem(craftFilter) end)
-                            if craftSuccess and craftResult == true then
+                            logMessage("INFO", "Auto-crafting items that were removed from ME", { item = data.name, count = trueDeficit })
+                            local craftOutcome, craftErr = requestCraft(craftFilter)
+                            if craftOutcome == "scheduled" then
                                 print("[Auto-Craft]", trueDeficit, "x", data.name, "(items removed)")
                                 statsData.totalCrafts = statsData.totalCrafts + 1
                                 addPendingCraft(data.item.name, trueDeficit)
                                 logMessage("INFO", "Auto-crafting scheduled for removed items", { item = data.name, count = trueDeficit })
                                 color = colors.yellow
                                 status = "crafting"
-                            elseif not craftSuccess then
+                            elseif craftOutcome == "error" then
                                 print("[Craft Error]", data.name, "- peripheral disconnect")
-                                logMessage("ERROR", "Auto-craft failed due to peripheral error", { item = data.name, error = tostring(craftResult) })
+                                logMessage("ERROR", "Auto-craft failed due to peripheral error", { item = data.name, error = craftErr })
                                 color = colors.red
                                 status = "failed"
+                            elseif craftOutcome == "busy" then
+                                print("[CPU Busy]", data.name, "- will retry next scan")
+                                color = colors.magenta
+                                status = "waiting_cpu"
                             else
                                 print("[No Pattern]", data.name, "- items removed, no pattern")
                                 logMessage("WARN", "Items removed and no crafting pattern available", { item = data.name, needed = data.needed })
@@ -2455,7 +2499,7 @@ function scanWorkRequests(mon, bridge, direction)
                 if provided < data.needed and data.item.name then
                     local remaining = data.needed - provided
                     
-                    -- Calculate true deficit (accounts for items in RS and pending crafts)
+                    -- Calculate true deficit (accounts for items in ME and pending crafts)
                     local trueDeficit = calculateTrueDeficit(data.item.name, remaining)
                     
                     if trueDeficit > 0 then
@@ -2466,30 +2510,35 @@ function scanWorkRequests(mon, bridge, direction)
                         
                         -- Try to craft - wrap in pcall to prevent crashes from peripheral disconnects
                         logMessage("INFO", "Attempting to craft remaining items", { item = data.name, remaining = remaining, trueDeficit = trueDeficit })
-                        local success, craftResult = pcall(function() return bridge.craftItem(craftFilter) end)
-                        if success and craftResult == true then
+                        local craftOutcome, craftErr = requestCraft(craftFilter)
+                        if craftOutcome == "scheduled" then
                             print("[Crafting]", trueDeficit, "x", data.name)
                             statsData.totalCrafts = statsData.totalCrafts + 1
                             addPendingCraft(data.item.name, trueDeficit)
                             logMessage("INFO", "Crafting scheduled", { item = data.name, count = trueDeficit })
                             color = colors.yellow
                             status = "crafting"
-                        elseif not success then
+                        elseif craftOutcome == "error" then
                             -- pcall failed - peripheral error or disconnect
                             print("[Craft Error]", data.name, "- peripheral disconnect")
-                            logMessage("ERROR", "Crafting failed due to peripheral error", { item = data.name, error = tostring(craftResult) })
+                            logMessage("ERROR", "Crafting failed due to peripheral error", { item = data.name, error = craftErr })
                             color = colors.orange
                             status = "partial_fail"
+                        elseif craftOutcome == "busy" then
+                            -- Pattern exists but every Crafting CPU is in use - retried next scan
+                            print("[CPU Busy]", data.name, "- will retry next scan")
+                            color = colors.magenta
+                            status = "waiting_cpu"
                         else
-                            -- craftItem returned false/nil - no pattern exists
+                            -- craftItem failed and isItemCraftable is false - no pattern exists
                             print("[No Pattern]", data.name, "- partial fill only")
                             logMessage("WARN", "No crafting pattern available for remaining items", { item = data.name, provided = provided, needed = data.needed })
                             color = colors.orange
                             status = "partial_fail"
                         end
                     else
-                        -- Items already in RS or pending - no need to craft more
-                        logMessage("INFO", "Items already in RS or pending craft", { item = data.name, remaining = remaining, trueDeficit = trueDeficit })
+                        -- Items already in ME or pending - no need to craft more
+                        logMessage("INFO", "Items already in ME or pending craft", { item = data.name, remaining = remaining, trueDeficit = trueDeficit })
                         color = colors.yellow
                         status = "crafting"
                     end
@@ -2506,7 +2555,7 @@ function scanWorkRequests(mon, bridge, direction)
                 logMessage("WARN", "Export failed - item not in storage", { item = data.name, error = err or "not in storage" })
                 -- Export failed, try crafting the full amount
                 if data.item.name then
-                    -- Calculate true deficit (accounts for items in RS and pending crafts)
+                    -- Calculate true deficit (accounts for items in ME and pending crafts)
                     local trueDeficit = calculateTrueDeficit(data.item.name, data.needed)
                     
                     if trueDeficit > 0 then
@@ -2517,30 +2566,35 @@ function scanWorkRequests(mon, bridge, direction)
                         
                         -- Try to craft - wrap in pcall to prevent crashes from peripheral disconnects
                         logMessage("INFO", "Attempting to craft full amount", { item = data.name, needed = data.needed, trueDeficit = trueDeficit })
-                        local success, craftResult = pcall(function() return bridge.craftItem(craftFilter) end)
-                        if success and craftResult == true then
+                        local craftOutcome, craftErr = requestCraft(craftFilter)
+                        if craftOutcome == "scheduled" then
                             print("[Crafting]", trueDeficit, "x", data.name)
                             statsData.totalCrafts = statsData.totalCrafts + 1
                             addPendingCraft(data.item.name, trueDeficit)
                             logMessage("INFO", "Crafting scheduled", { item = data.name, count = trueDeficit })
                             color = colors.yellow
                             status = "crafting"
-                        elseif not success then
+                        elseif craftOutcome == "error" then
                             -- pcall failed - peripheral error or disconnect
                             print("[Craft Error]", data.name, "- peripheral disconnect")
-                            logMessage("ERROR", "Crafting failed due to peripheral error", { item = data.name, error = tostring(craftResult) })
+                            logMessage("ERROR", "Crafting failed due to peripheral error", { item = data.name, error = craftErr })
                             color = colors.red
                             status = "failed"
+                        elseif craftOutcome == "busy" then
+                            -- Pattern exists but every Crafting CPU is in use - retried next scan
+                            print("[CPU Busy]", data.name, "- will retry next scan")
+                            color = colors.magenta
+                            status = "waiting_cpu"
                         else
-                            -- craftItem returned false/nil - no pattern exists
+                            -- craftItem failed and isItemCraftable is false - no pattern exists
                             print("[No Pattern]", data.name, "- not in storage, no pattern")
                             logMessage("WARN", "Item not in storage and no crafting pattern available", { item = data.name, needed = data.needed })
                             color = colors.red
                             status = "failed"
                         end
                     else
-                        -- Items already in RS or pending craft - no need to craft more
-                        logMessage("INFO", "Items already in RS or pending craft, skipping new craft", { item = data.name, needed = data.needed, trueDeficit = trueDeficit })
+                        -- Items already in ME or pending craft - no need to craft more
+                        logMessage("INFO", "Items already in ME or pending craft, skipping new craft", { item = data.name, needed = data.needed, trueDeficit = trueDeficit })
                         color = colors.yellow
                         status = "crafting"
                     end
@@ -2659,7 +2713,7 @@ local function displayTerminalMenu()
     term.clear()
     term.setCursorPos(1, 1)
     print("========================================")
-    print("  ColonyManager-Pro-RS Terminal Menu")
+    print("  ColonyManager-Pro-ME Terminal Menu")
     print("========================================")
     print("")
     print("  [1] View Logs")

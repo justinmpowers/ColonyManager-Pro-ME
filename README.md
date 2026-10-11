@@ -1,12 +1,12 @@
-# ColonyManager-Pro-RS
+# ColonyManager-Pro-ME
 
-**Automated MineColonies Request Fulfillment for Refined Storage**
+**Automated MineColonies Request Fulfillment for Applied Energistics 2**
 
-ColonyManager-Pro-RS is a ComputerCraft/CC:Tweaked program that automatically fulfills MineColonies citizen requests and building work orders from your Refined Storage system.
+ColonyManager-Pro-ME is a ComputerCraft/CC:Tweaked program that automatically fulfills MineColonies citizen requests and building work orders from your Applied Energistics 2 system.
 
 ## Features
 
-- **Automatic Request Fulfillment** - Monitors colony requests and exports items from RS
+- **Automatic Request Fulfillment** - Monitors colony requests and exports items from your ME system
 - **Smart Tool Handling** - Provides the cheapest acceptable tool based on building level
 - **Work Order Support** - Fulfills building construction resource requests
 - **Auto-Crafting** - Schedules crafting jobs for items not in storage
@@ -19,42 +19,42 @@ ColonyManager-Pro-RS is a ComputerCraft/CC:Tweaked program that automatically fu
 
 - **Minecraft Mods:**
   - [MineColonies](https://www.curseforge.com/minecraft/mc-mods/minecolonies)
-  - [Refined Storage](https://www.curseforge.com/minecraft/mc-mods/refined-storage)
+  - [Applied Energistics 2](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
   - [CC:Tweaked](https://www.curseforge.com/minecraft/mc-mods/cc-tweaked) (ComputerCraft)
   - [Advanced Peripherals](https://www.curseforge.com/minecraft/mc-mods/advanced-peripherals) 0.7+
 
 - **Peripherals Required:**
   - Advanced Computer
   - Monitor (any size, 0.5 text scale recommended)
-  - RS Bridge (from Advanced Peripherals)
+  - ME Bridge (from Advanced Peripherals)
   - Colony Integrator (from Advanced Peripherals)
 
 ## Installation
 
-### Quick Install (Pastebin)
+### Quick Install
 
 1. Place a computer with a **Modem** and **Monitor** (any size)
 2. Connect the computer to:
-   - A **Refined Storage Bridge** (for item access)
+   - An **ME Bridge** (for item access), connected to your ME network by ME cable (it uses one channel)
    - A **Colony Integrator** (for MineColonies data)
    - The **Monitor** (for GUI)
 3. Run the installer:
    ```lua
-   pastebin run geYwT6PF
+   wget run https://raw.githubusercontent.com/justinmpowers/ColonyManager-Pro-ME/main/installer.lua
    ```
-4. The GitHub repository is already configured for ColonyManager-Pro-RS
+4. The GitHub repository is already configured for ColonyManager-Pro-ME
 
 The installer will:
 - Download all necessary files from GitHub
 - Create a startup script to run on boot
 - Configure auto-updates from GitHub
-- Reboot the computer to start ColonyManager-Pro-RS
+- Reboot the computer to start ColonyManager-Pro-ME
 
 ### Manual Install
 
 1. Download all files from this repository
 2. Place them in your computer's root directory:
-   - `RSWarehouse.lua` - Main program
+   - `MEWarehouse.lua` - Main program
    - `startup.lua` - Boot script
    - `updater.lua` - Auto-update module
    - `config.lua` - Configuration
@@ -68,7 +68,7 @@ Edit `config.lua` to customize:
 ```lua
 return {
     -- GitHub repository for updates
-    github_repo = "BRid37/ColonyManager-Pro-RS",
+    github_repo = "justinmpowers/ColonyManager-Pro-ME",
     github_branch = "main",
     
     -- Scan interval (seconds)
@@ -89,7 +89,7 @@ return {
 
 ## Smart Tool Handling
 
-When enabled, ColonyManager-Pro-RS intelligently fulfills tool and armor requests:
+When enabled, ColonyManager-Pro-ME intelligently fulfills tool and armor requests:
 
 ### How It Works
 
@@ -131,11 +131,12 @@ The touch-screen monitor displays:
 | [..] | Orange | Partial fill, awaiting craft |
 | [XX] | Red | Failed - not available |
 | [!>] | Orange | Partial fill, craft failed |
+| [CP] | Magenta | Pattern exists, but no free ME Crafting CPU (retried next scan) |
 | [??] | Blue | Manual fulfillment needed |
 
 ## Auto-Updates
 
-ColonyManager-Pro-RS checks for updates from GitHub on each boot:
+ColonyManager-Pro-ME checks for updates from GitHub on each boot:
 
 1. Compares local version to latest GitHub commit
 2. Downloads updated files if newer version exists
@@ -153,15 +154,15 @@ Remove or rename `updater.lua` to disable automatic updates.
 │           Advanced Computer          │
 ├─────────────────────────────────────┤
 │  ┌─────────┐  ┌─────────┐           │
-│  │ Monitor │  │RS Bridge│           │
+│  │ Monitor │  │ME Bridge│           │
 │  └─────────┘  └─────────┘           │
 │                                      │
 │  ┌──────────────────┐               │
 │  │ Colony Integrator │               │
 │  └──────────────────┘               │
 │                                      │
-│  RS Bridge connects to RS Controller │
-│  via cable or adjacent placement     │
+│  ME Bridge joins the ME network via  │
+│  ME cable (uses one channel)         │
 └─────────────────────────────────────┘
 ```
 
@@ -173,12 +174,19 @@ Remove or rename `updater.lua` to disable automatic updates.
 - Move the integrator within your colony's claimed chunks
 - Check that your Town Hall is placed and colony is established
 
-### "RS Bridge not found"
-- Ensure RS Bridge is connected to the computer
-- Verify RS Bridge is connected to your RS network
+### "ME Bridge not found"
+- Ensure ME Bridge is connected to the computer
+- Verify ME Bridge is connected to your ME network and the network is powered
+- Make sure the ME Bridge has a free channel (check your controller or cable channel usage)
+- Advanced Peripherals 0.7.x names the peripheral `meBridge`, and 0.8+ names it `me_bridge`. Both are detected.
+
+### Requests stuck on [CP] / "no Crafting CPU is free"
+- AE2 needs an idle **Crafting CPU** for every crafting job
+- Build more Crafting CPUs (or larger ones) if many requests queue at once
+- Waiting requests are retried automatically on the next scan
 
 ### Items not exporting
-- Check the RS Bridge has access to the warehouse inventory
+- Check the ME Bridge has access to the warehouse inventory
 - Verify the export direction in `config.lua`
 - Check if item is in the excluded list
 
@@ -191,14 +199,14 @@ Remove or rename `updater.lua` to disable automatic updates.
 
 ```
 /
-├── RSWarehouse.lua      # Main program
+├── MEWarehouse.lua      # Main program
 ├── startup.lua          # Boot script
 ├── updater.lua          # Auto-update module
 ├── config.lua           # User configuration
-├── installer.lua        # Pastebin installer
+├── installer.lua        # Installer (wget run)
 ├── excluded_items.txt   # Runtime excluded items
 ├── .rswarehouse_version # Current version hash
-└── RSWarehouse.log      # Activity log
+└── MEWarehouse.log      # Activity log
 ```
 
 ## Contributing

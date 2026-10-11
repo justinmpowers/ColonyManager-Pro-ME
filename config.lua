@@ -1,10 +1,10 @@
--- RSWarehouse Configuration
+-- MEWarehouse Configuration
 -- Edit this file to customize your setup
 
 return {
     -- GitHub repository for updates
     -- Format: "username/repository"
-    github_repo = "BRid37/ColonyManager-Pro-RS",
+    github_repo = "justinmpowers/ColonyManager-Pro-ME",
     github_branch = "main",
     
     -- Scan settings
@@ -16,7 +16,7 @@ return {
     max_log_size = 50000,
     log_rotate_enabled = true,
     
-    -- Storage direction (relative to RS Bridge)
+    -- Storage direction (relative to ME Bridge)
     storage_direction = "back",
     
     -- Excluded items list
