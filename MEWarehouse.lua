@@ -255,6 +255,24 @@ if not bridge then
   error("ME Bridge not found.") 
 end
 print("ME Bridge initialized.")
+
+-- Advanced Peripherals 0.8+ swapped exportItem's arguments to (target, filter)
+-- and renamed isItemCraftable to isCraftable
+local NEW_BRIDGE_API = bridge.isItemCraftable == nil
+
+local function bridgeExport(filter, direction)
+  if NEW_BRIDGE_API then
+    return bridge.exportItem(direction, filter)
+  end
+  return bridge.exportItem(filter, direction)
+end
+
+local function bridgeIsCraftable(filter)
+  if NEW_BRIDGE_API then
+    return bridge.isCraftable(filter)
+  end
+  return bridge.isItemCraftable(filter)
+end
 logMessage("INFO", "ME Bridge initialized successfully")
 
 -- Initialize Colony Integrator
@@ -484,8 +502,9 @@ local function getCitizenWorkBuildingLevel(citizenName)
         if citizen.name == citizenName or 
            (citizen.name and citizenName:find(citizen.name)) then
             -- Found the citizen, now find their work building
-            if citizen.work and citizen.work.location then
-                local workLoc = citizen.work.location
+            local work = citizen.workBuilding or citizen.work
+            if work and (work.pos or work.location) then
+                local workLoc = work.pos or work.location
                 -- Find matching building
                 if colonyCache.buildings then
                     for _, building in ipairs(colonyCache.buildings) do
@@ -498,8 +517,8 @@ local function getCitizenWorkBuildingLevel(citizenName)
                     end
                 end
                 -- Return level from work data if available
-                if citizen.work.level then
-                    return citizen.work.level
+                if work.level then
+                    return work.level
                 end
             end
         end
@@ -548,7 +567,8 @@ local function resolveRequestTarget(target)
         return type(loc) == "table" and loc.x == target.x and loc.y == target.y and loc.z == target.z
     end
     local function jobName(citizen)
-        local job = (citizen.work and (citizen.work.type or citizen.work.name)) or citizen.job
+        local job = (citizen.workBuilding and citizen.workBuilding.job)
+            or (citizen.work and (citizen.work.type or citizen.work.name)) or citizen.job
         if type(job) ~= "string" or job == "" then return nil end
         job = job:match("([^%.:]+)$") or job  -- strip "minecolonies:" / "com.minecolonies.job." prefixes
         return job:sub(1, 1):upper() .. job:sub(2)
@@ -557,11 +577,13 @@ local function resolveRequestTarget(target)
     local homeMatch = nil
     for _, citizen in ipairs(colonyCache.citizens or {}) do
         if type(citizen.name) == "string" then
-            if citizen.work and samePos(citizen.work.location) then
+            local work = citizen.workBuilding or citizen.work
+            local home = citizen.homeBuilding or citizen.home
+            if work and samePos(work.pos or work.location) then
                 local job = jobName(citizen)
                 return job and (job .. " " .. citizen.name) or citizen.name
             end
-            if not homeMatch and citizen.home and samePos(citizen.home.location) then
+            if not homeMatch and home and samePos(home.pos or home.location) then
                 homeMatch = citizen.name
             end
         end
@@ -707,7 +729,7 @@ local function requestCraft(craftFilter)
     end
 
     local okCraftable, craftable = pcall(function()
-        return bridge.isItemCraftable({ name = craftFilter.name, nbt = craftFilter.nbt })
+        return bridgeIsCraftable({ name = craftFilter.name, nbt = craftFilter.nbt })
     end)
     if okCraftable and craftable then
         logMessage("WARN", "ME craft not started - pattern exists but no Crafting CPU is free", { item = craftFilter.name, error = err })
@@ -1276,7 +1298,7 @@ function trySmartToolFulfillment(request, bridge, direction)
   for _, itemName in ipairs(alternatives) do
     local exportItem = { name = itemName, count = request.needed }
     local success, result = pcall(function() 
-      return bridge.exportItem(exportItem, direction) 
+      return bridgeExport(exportItem, direction) 
     end)
     
     if success and result then
@@ -1342,7 +1364,7 @@ function trySmartArmorFulfillment(request, bridge, direction)
   for _, itemName in ipairs(alternatives) do
     local exportItem = { name = itemName, count = request.needed }
     local success, result = pcall(function() 
-      return bridge.exportItem(exportItem, direction) 
+      return bridgeExport(exportItem, direction) 
     end)
     
     if success and result then
@@ -2140,27 +2162,41 @@ function getWorkOrderResourceList(colony)
             end
             
             if resources then
-                logMessage("DEBUG", "Work order resources found", { orderId = order.id, type = order.workOrderType, building = order.type })
-                
+                -- AP 0.7: type = building, workOrderType = kind. AP 0.8+: type = kind, displayName = building
+                local orderKind = order.workOrderType or order.type or "?"
+                local orderName = (order.workOrderType and order.type) or order.displayName or "Work order"
+                logMessage("DEBUG", "Work order resources found", { orderId = order.id, type = orderKind, building = orderName })
+
                 for _, resource in ipairs(resources) do
+                    -- AP 0.7: item is a name, needed is the count, available is a boolean
+                    -- AP 0.8+: item is a table, needs/available/delivering are counts
+                    local itemName = type(resource.item) == "table" and resource.item.name or resource.item
+                    local needed = nil
+                    if type(resource.available) == "number" then
+                        needed = (resource.needs or 0) - resource.available - (resource.delivering or 0)
+                        if needed <= 0 then needed = nil end
+                    elseif not resource.available then
+                        needed = resource.needed
+                    end
+
                     -- Only process items that are needed and not available
-                    if resource.needed and not resource.available then
+                    if needed then
                         local item = {}
-                        if resource.item then
+                        if itemName then
                             item = { 
-                                name = resource.item, 
-                                count = resource.needed,
-                                displayName = resource.displayName or resource.item
+                                name = itemName, 
+                                count = needed,
+                                displayName = resource.displayName or itemName
                             }
                         end
                         
                         local newRecord = {}
-                        newRecord.name = resource.displayName or resource.item or "Unknown"
-                        newRecord.desc = "Work order: " .. order.workOrderType
-                        newRecord.needed = resource.needed
+                        newRecord.name = resource.displayName or itemName or "Unknown"
+                        newRecord.desc = "Work order: " .. orderKind
+                        newRecord.needed = needed
                         newRecord.item = item
                         newRecord.requestType = "workorder"
-                        newRecord.requestFor = order.type .. " (Level " .. (order.targetLevel or "?") .. ")"
+                        newRecord.requestFor = orderName .. " (Level " .. (order.targetLevel or "?") .. ")"
                         newRecord.workOrderId = order.id
                         newRecord.builder = order.builder or "Unassigned"
                         
@@ -2470,7 +2506,7 @@ function scanWorkRequests(mon, bridge, direction)
                 if currentInME > 0 then
                     -- Items still available - proceed with export
                     -- Wrap exportItem in pcall to prevent crashes from peripheral disconnects
-                    success, result, err = pcall(function() return bridge.exportItem(data.item, direction) end)
+                    success, result, err = pcall(function() return bridgeExport(data.item, direction) end)
                     if not success then
                         -- pcall failed - peripheral error
                         logMessage("ERROR", "Export failed due to peripheral error", { item = data.name, error = tostring(result) })
