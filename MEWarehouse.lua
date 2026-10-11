@@ -529,6 +529,49 @@ local function getBuildingLevelByType(buildingType)
     return maxLevel
 end
 
+--[[
+    Resolve Request Target
+    @desc   Turn a request's target into a "Job First Last" string. AP 0.7 returns that
+            string directly; AP 0.8+ returns the requesting building's position
+            ({x, y, z}), so look up the citizen who works (or lives) there.
+    @param  target - String or position table from getRequests()
+    @return string|nil - Requester description, or nil if unknown
+]]
+local function resolveRequestTarget(target)
+    if type(target) == "string" then return target end
+    if type(target) ~= "table" then return nil end
+    if type(target.name) == "string" then return target.name end
+    if not (target.x and target.y and target.z) then return nil end
+
+    updateColonyCache()
+    local function samePos(loc)
+        return type(loc) == "table" and loc.x == target.x and loc.y == target.y and loc.z == target.z
+    end
+    local function jobName(citizen)
+        local job = (citizen.work and (citizen.work.type or citizen.work.name)) or citizen.job
+        if type(job) ~= "string" or job == "" then return nil end
+        job = job:match("([^%.:]+)$") or job  -- strip "minecolonies:" / "com.minecolonies.job." prefixes
+        return job:sub(1, 1):upper() .. job:sub(2)
+    end
+
+    local homeMatch = nil
+    for _, citizen in ipairs(colonyCache.citizens or {}) do
+        if type(citizen.name) == "string" then
+            if citizen.work and samePos(citizen.work.location) then
+                local job = jobName(citizen)
+                return job and (job .. " " .. citizen.name) or citizen.name
+            end
+            if not homeMatch and citizen.home and samePos(citizen.home.location) then
+                homeMatch = citizen.name
+            end
+        end
+    end
+    if homeMatch then return homeMatch end
+
+    logMessage("DEBUG", "No citizen found for request target", { x = target.x, y = target.y, z = target.z })
+    return nil
+end
+
 ----------------------------------------------------------------------------
 -- PENDING CRAFTS TRACKING (Prevents over-crafting)
 ----------------------------------------------------------------------------
@@ -2028,9 +2071,12 @@ function getWorkRequestList(colony)
     
     for w in pairs(workRequests) do
         writeToLog(workRequests[w], "--- Citizen Request start ---", "--- Citizen Request end ---")
-        name = workRequests[w].name or "Unknown"
-        colonist = createColonistData(workRequests[w].target)
-        desc = workRequests[w].desc or ""
+        -- Field names differ between Advanced Peripherals versions:
+        -- 0.7 uses name/desc/target, 0.8+ uses displayName/description
+        local req = workRequests[w]
+        name = req.name or req.displayName or "Unknown"
+        colonist = createColonistData(resolveRequestTarget(req.target))
+        desc = req.desc or req.description or ""
         item = {}
         
         if workRequests[w].items and workRequests[w].items[1] then
