@@ -58,7 +58,10 @@ return {
         ["stone"] = 2,
         ["iron"] = 3,
         ["diamond"] = 5,
-        ["netherite"] = 10
+        ["netherite"] = 10,
+        ["leather"] = 1,
+        ["chain"] = 2,
+        ["chainmail"] = 2
     },
     
     -- Building level to maximum allowed tool tier

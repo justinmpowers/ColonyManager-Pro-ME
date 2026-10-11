@@ -62,6 +62,10 @@ local materialCosts = (userConfig and userConfig.material_costs) or {
     ["diamond"] = 5,
     ["netherite"] = 10
 }
+-- Armor materials were missing from older configs; without them they sort as most expensive
+for material, cost in pairs({ ["leather"] = 1, ["chain"] = 2, ["chainmail"] = 2 }) do
+    if materialCosts[material] == nil then materialCosts[material] = cost end
+end
 
 -- Building level to tool tier mapping
 local buildingToolTiers = (userConfig and userConfig.building_tool_tiers) or {
@@ -1255,6 +1259,27 @@ function processWorkRequestItem(request)
 end
 
 --[[
+    Filter Accepted Items
+    @desc   Keep only alternatives the request itself lists as acceptable, so we never
+            send an item outside the request's min/max level
+    @param  alternatives - Item names, cheapest first
+    @param  request - The work request data (acceptedItems is a set of item names)
+    @return table - Filtered item names, cheapest first
+]]
+local function filterAcceptedItems(alternatives, request)
+  if not request.acceptedItems or next(request.acceptedItems) == nil then
+    return alternatives
+  end
+  local filtered = {}
+  for _, itemName in ipairs(alternatives) do
+    if request.acceptedItems[itemName] then
+      table.insert(filtered, itemName)
+    end
+  end
+  return filtered
+end
+
+--[[
     Try Smart Tool Fulfillment
     @desc   Attempt to fulfill a tool request with the cheapest acceptable option
     @param  request - The work request data
@@ -1286,7 +1311,8 @@ function trySmartToolFulfillment(request, bridge, direction)
   local maxTier = parseToolLevelFromDesc(request.desc)
   
   -- Get alternatives sorted by cost (cheapest first)
-  local alternatives = getSmartToolAlternatives(toolType, maxTier, buildingLevel)
+  local alternatives = filterAcceptedItems(getSmartToolAlternatives(toolType, maxTier, buildingLevel), request)
+  request.smartCandidates = alternatives
   
   logMessage("DEBUG", "Smart tool alternatives", { 
     toolType = toolType, 
@@ -1352,7 +1378,8 @@ function trySmartArmorFulfillment(request, bridge, direction)
   end
   
   -- Get alternatives sorted by cost (cheapest first)
-  local alternatives = getSmartArmorAlternatives(armorType, buildingLevel)
+  local alternatives = filterAcceptedItems(getSmartArmorAlternatives(armorType, buildingLevel), request)
+  request.smartCandidates = alternatives
   
   logMessage("DEBUG", "Smart armor alternatives", { 
     armorType = armorType, 
@@ -2121,6 +2148,11 @@ function getWorkRequestList(colony)
         newRecord.colonist = colonist
         newRecord.requestType = "citizen"
         newRecord.requestFor = colonist.fullName
+        -- Every item MineColonies would accept for this request (e.g. all boots within the level range)
+        newRecord.acceptedItems = {}
+        for _, acceptedItem in ipairs(req.items or {}) do
+          if acceptedItem.name then newRecord.acceptedItems[acceptedItem.name] = true end
+        end
         table.insert(requestList, newRecord)
         writeToLog(newRecord, "--- Citizen Record start ---", "--- Citizen Record end ---")
       end
@@ -2494,6 +2526,20 @@ function scanWorkRequests(mon, bridge, direction)
                 end
             end
             
+            -- Smart export found nothing in stock: target the cheapest acceptable item
+            -- that has a crafting pattern, rather than the request's first listed item
+            -- (which may be a modded item like mekanism:free_runners)
+            if provided == 0 and data.smartCandidates then
+                for _, candidate in ipairs(data.smartCandidates) do
+                    local okCraftable, craftable = pcall(function() return bridgeIsCraftable({ name = candidate }) end)
+                    if okCraftable and craftable then
+                        logMessage("INFO", "Using cheapest craftable item for equipment request", { request = data.name, item = candidate })
+                        data.item = { name = candidate, count = data.needed }
+                        break
+                    end
+                end
+            end
+
             -- If smart fulfillment didn't work or wasn't used, try normal export
             if provided == 0 then
                 -- Pre-export verification: Check if items still exist in ME
