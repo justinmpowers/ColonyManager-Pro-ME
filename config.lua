@@ -16,7 +16,9 @@ return {
     max_log_size = 50000,
     log_rotate_enabled = true,
     
-    -- Storage direction (relative to ME Bridge)
+    -- Side of the ME Bridge the output inventory is on:
+    -- "up", "down", "north", "south", "east" or "west"
+    -- (Advanced Peripherals 0.8+ also accepts a wired-modem name like "minecraft:chest_0")
     storage_direction = "back",
     
     -- Excluded items list

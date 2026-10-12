@@ -279,9 +279,20 @@ print("ME Bridge initialized.")
 -- and renamed isItemCraftable to isCraftable
 local NEW_BRIDGE_API = bridge.isItemCraftable == nil
 
+local BRIDGE_SIDES = {
+  up = true, down = true, north = true, south = true, east = true, west = true,
+  top = true, bottom = true, front = true, back = true, left = true, right = true,
+}
+
 local function bridgeExport(filter, direction)
   if NEW_BRIDGE_API then
-    return bridge.exportItem(direction, filter)
+    -- 0.8+ treats a plain name as a peripheral attached to the computer (e.g. "minecraft:chest_0");
+    -- a side of the bridge itself needs an "@" prefix (e.g. "@up")
+    local target = direction
+    if BRIDGE_SIDES[string.lower(direction)] then
+      target = "@" .. direction
+    end
+    return bridge.exportItem(target, filter)
   end
   return bridge.exportItem(filter, direction)
 end
