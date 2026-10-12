@@ -771,7 +771,7 @@ local function requestCraft(craftFilter)
     end
 
     local okCraftable, craftable = pcall(function()
-        return bridgeIsCraftable({ name = craftFilter.name, nbt = craftFilter.nbt })
+        return bridgeIsCraftable({ name = craftFilter.name, nbt = craftFilter.nbt, nbtHash = craftFilter.nbtHash })
     end)
     if okCraftable and craftable then
         logMessage("WARN", "ME craft not started - pattern exists but no Crafting CPU is free", { item = craftFilter.name, error = err })
@@ -2230,12 +2230,16 @@ function getWorkRequestList(colony)
         item = {}
         
         if workRequests[w].items and workRequests[w].items[1] then
-          if not workRequests[w].items[1].nbt or table.empty(workRequests[w].items[1].nbt) then
-            item = { name = workRequests[w].items[1].name, count =  workRequests[w].count, displayName = workRequests[w].items[1].displayName}
-          else
-            item = { name = workRequests[w].items[1].name, count = workRequests[w].count, displayName = workRequests[w].items[1].displayName, nbt =  workRequests[w].items[1].nbt}
+          local requestItem = workRequests[w].items[1]
+          item = { name = requestItem.name, count = workRequests[w].count, displayName = requestItem.displayName }
+          if type(requestItem.nbt) == "table" and not table.empty(requestItem.nbt) then
+            -- AP 0.7: NBT table
+            item.nbt = requestItem.nbt
+          elseif type(requestItem.nbt) == "string" and requestItem.nbt ~= "" then
+            -- AP 0.8+: "nbt" is a fingerprint of the item's components, filtered as nbtHash
+            item.nbtHash = requestItem.nbt
           end
-          logMessage("DEBUG", "Parsed citizen request item", { name = name, itemName = item.name, count = item.count, hasNBT = item.nbt ~= nil })
+          logMessage("DEBUG", "Parsed citizen request item", { name = name, itemName = item.name, count = item.count, hasNBT = (item.nbt or item.nbtHash) ~= nil })
         else
           logMessage("WARN", "Citizen request has no items array", { name = name, target = workRequests[w].target })
         end
@@ -2763,6 +2767,7 @@ function scanWorkRequests(mon, bridge, direction)
                             if data.item.nbt then
                                 craftFilter.nbt = data.item.nbt
                             end
+                            craftFilter.nbtHash = data.item.nbtHash
                             
                             logMessage("INFO", "Auto-crafting items that were removed from ME", { item = data.name, count = trueDeficit })
                             local craftOutcome, craftErr = requestCraft(craftFilter)
@@ -2823,6 +2828,7 @@ function scanWorkRequests(mon, bridge, direction)
                         if data.item.nbt then
                             craftFilter.nbt = data.item.nbt
                         end
+                        craftFilter.nbtHash = data.item.nbtHash
                         
                         -- Try to craft - wrap in pcall to prevent crashes from peripheral disconnects
                         logMessage("INFO", "Attempting to craft remaining items", { item = data.name, remaining = remaining, trueDeficit = trueDeficit })
@@ -2879,6 +2885,7 @@ function scanWorkRequests(mon, bridge, direction)
                         if data.item.nbt then
                             craftFilter.nbt = data.item.nbt
                         end
+                        craftFilter.nbtHash = data.item.nbtHash
                         
                         -- Try to craft - wrap in pcall to prevent crashes from peripheral disconnects
                         logMessage("INFO", "Attempting to craft full amount", { item = data.name, needed = data.needed, trueDeficit = trueDeficit })
