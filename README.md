@@ -14,6 +14,8 @@ ColonyManager-Pro-ME is a ComputerCraft/CC:Tweaked program that automatically fu
 - **Interactive Monitor GUI** - Touch-screen interface for status and configuration
 - **Excluded Items Management** - Configure items to skip via GUI
 - **Night Pause** - Optional pause during night (configurable)
+- **No Duplicate Exports** - Items already sent to the warehouse aren't sent again while they wait for pickup
+- **Wireless Remote Screen** - View requests and refresh from a pocket computer (optional)
 
 ## Requirements
 
@@ -132,7 +134,26 @@ The touch-screen monitor displays:
 | [XX] | Red | Failed - not available |
 | [!>] | Orange | Partial fill, craft failed |
 | [CP] | Magenta | Pattern exists, but no free ME Crafting CPU (retried next scan) |
+| [->] | Light Blue | Already in the warehouse, waiting for a courier or builder |
 | [??] | Blue | Manual fulfillment needed |
+
+## Wireless Remote Screen
+
+See your colony's requests from anywhere on a **Pocket Computer**, or on a second computer with its own monitor.
+
+1. Attach a **Wireless Modem** or **Ender Modem** to the main computer and reboot it. It prints "Wireless modem found - remote screens enabled."
+2. Craft an **Advanced Pocket Computer** together with a Wireless or Ender Modem.
+3. On the pocket computer, run:
+   ```lua
+   wget https://raw.githubusercontent.com/justinmpowers/ColonyManager-Pro-ME/main/remote.lua startup.lua
+   ```
+   Then reboot the pocket computer. It starts the remote screen automatically.
+
+The remote screen updates after every scan. Tap **Refresh** to scan now, or **Clear** to dismiss a crafting warning. Scroll with the mouse wheel or arrow keys. Keyboard shortcuts: R refreshes, C clears the warning, Q quits.
+
+A Wireless Modem reaches about 64 blocks. An Ender Modem works at any distance and across dimensions.
+
+To update the remote screen, delete `startup.lua` on the pocket computer and run the `wget` command again.
 
 ## Auto-Updates
 
@@ -190,6 +211,16 @@ Remove or rename `updater.lua` to disable automatic updates.
 - Verify the export direction in `config.lua`
 - Check if item is in the excluded list
 
+### "CRAFTING WARNING" on the monitor
+- A crafting job was requested 5+ minutes ago and the items never arrived in the ME system
+- Check the job in AE2: missing ingredients, no free Crafting CPU, or still running
+- The warning clears by itself once the items arrive, or when the request disappears
+
+### Requests stay on [->] but nothing is delivered
+- The items are in the warehouse, so check that the Warehouse has Couriers and that they can reach the requesting building
+- After 20 minutes without pickup, the program assumes the items were lost and exports again
+- Terminal menu (press M) > Clear All Tracking Data resets this immediately
+
 ### Updates not working
 - Verify `github_repo` is set correctly in `config.lua`
 - Ensure HTTP API is enabled in ComputerCraft config
@@ -204,6 +235,7 @@ Remove or rename `updater.lua` to disable automatic updates.
 ├── updater.lua          # Auto-update module
 ├── config.lua           # User configuration
 ├── installer.lua        # Installer (wget run)
+├── remote.lua           # Wireless remote screen (pocket computer)
 ├── excluded_items.txt   # Runtime excluded items
 ├── .rswarehouse_version # Current version hash
 └── MEWarehouse.log      # Activity log

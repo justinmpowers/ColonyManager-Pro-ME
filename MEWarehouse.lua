@@ -2,7 +2,7 @@
 -- Updated for Advanced Peripherals 0.7: 2025-01-06
 -- GitHub Auto-Update Support Added: 2026-01-08
 
-local VERSION = "2.0.0"
+local VERSION = "2.1.0"
 local VERSION_FILE = ".mewarehouse_version"
 
 -- Load configuration from config.lua
@@ -91,15 +91,30 @@ local buildingArmorTiers = (userConfig and userConfig.building_armor_tiers) or {
 -- Key = item name, Value = { count = amount pending, timestamp = when requested, scansSinceExport = count }
 local pendingCrafts = {}
 local PENDING_CRAFTS_FILE = ".pending_crafts"
-local PENDING_WARNING_SCANS = 3  -- Show warning after this many scans without export
+local PENDING_WARNING_SECONDS = 300  -- Warn when a craft hasn't arrived after this long
 local pendingCraftsWarning = false  -- True when warning should be displayed
 local pendingCraftsWarningItems = {}  -- Items that triggered the warning
 
 -- Exported items tracking - items sent to output chest but not yet confirmed in warehouse
--- Key = item name, Value = { count = amount exported, timestamp = when exported }
+-- Key = item name, Value = { count = amount exported, timestamp = os.epoch("utc") of last change }
 local exportedItems = {}
 local EXPORTED_ITEMS_FILE = ".exported_items"
-local EXPORT_CONFIRM_TIMEOUT = 120  -- 2 minutes - if request disappears, assume delivered
+-- Exports still unclaimed after this long are assumed lost (e.g. taken out of the warehouse),
+-- so the request is allowed to export again
+local IN_TRANSIT_TIMEOUT = 1200  -- seconds (builder materials can wait a long time)
+
+-- Per-scan budgets so several requests for the same item share the in-transit and pending counts
+local scanTransitBudget = {}
+local scanPendingBudget = {}
+
+--[[
+    Pending Warning Scans
+    @desc   Number of scans a craft may stay pending before warning, based on the scan interval
+    @return number
+]]
+local function pendingWarningScans()
+    return math.max(3, math.ceil(PENDING_WARNING_SECONDS / time_between_runs))
+end
 
 -- Initialize current_run globally so displayMainPage can access it
 current_run = time_between_runs
@@ -298,6 +313,15 @@ elseif not inColonyResult then
 end
 print("Colony Integrator initialized.")
 logMessage("INFO", "Colony Integrator initialized successfully", { inColony = inColonyResult })
+
+-- Optional wireless or ender modem: broadcasts scan results to remote screens (remote.lua)
+local REMOTE_PROTOCOL = "colonymanager"
+local wirelessModem = peripheral.find("modem", function(_, modem) return modem.isWireless() end)
+if wirelessModem then
+  rednet.open(peripheral.getName(wirelessModem))
+  print("Wireless modem found - remote screens enabled.")
+  logMessage("INFO", "Wireless modem opened for remote screens", { modem = peripheral.getName(wirelessModem) })
+end
 
 -- Log buildings API status at startup
 if DISABLE_BUILDINGS_API then
@@ -644,7 +668,7 @@ local function checkPendingCraftsWarning()
         craftInfo.scansSinceExport = (craftInfo.scansSinceExport or 0) + 1
         
         -- Check if this item has been stuck for too long
-        if craftInfo.scansSinceExport >= PENDING_WARNING_SCANS and craftInfo.count > 0 then
+        if craftInfo.scansSinceExport >= pendingWarningScans() and craftInfo.count > 0 then
             hasWarning = true
             table.insert(pendingCraftsWarningItems, {
                 name = itemName,
@@ -657,6 +681,9 @@ local function checkPendingCraftsWarning()
     if hasWarning and not pendingCraftsWarning then
         pendingCraftsWarning = true
         logMessage("WARN", "Pending crafts warning triggered - items may be stuck", { items = #pendingCraftsWarningItems })
+    elseif not hasWarning and pendingCraftsWarning then
+        pendingCraftsWarning = false
+        logMessage("INFO", "Pending crafts warning auto-cleared - nothing is stuck anymore")
     end
     
     savePendingCrafts()
@@ -743,19 +770,6 @@ local function requestCraft(craftFilter)
 end
 
 --[[
-    Get Pending Craft Count
-    @desc   Get count of items currently pending in crafts
-    @param  itemName - The item name to check
-    @return number - Count of items pending
-]]
-local function getPendingCraftCount(itemName)
-    if pendingCrafts[itemName] then
-        return pendingCrafts[itemName].count
-    end
-    return 0
-end
-
---[[
     Add Pending Craft
     @desc   Track a new craft request
     @param  itemName - The item being crafted
@@ -797,7 +811,7 @@ local function clearPendingCraft(itemName, countExported)
         if pendingCraftsWarning then
             local stillStuck = false
             for _, craftInfo in pairs(pendingCrafts) do
-                if craftInfo.scansSinceExport >= PENDING_WARNING_SCANS and craftInfo.count > 0 then
+                if craftInfo.scansSinceExport >= pendingWarningScans() and craftInfo.count > 0 then
                     stillStuck = true
                     break
                 end
@@ -827,6 +841,12 @@ local function loadExportedItems()
         local success, data = pcall(textutils.unserialize, content)
         if success and data then
             exportedItems = data
+            -- Older versions stored os.clock() timestamps, which reset on reboot
+            for _, exportInfo in pairs(exportedItems) do
+                if type(exportInfo.timestamp) ~= "number" or exportInfo.timestamp < 1e12 then
+                    exportInfo.timestamp = os.epoch("utc")
+                end
+            end
             logMessage("INFO", "Loaded exported items from disk")
         end
     end
@@ -844,19 +864,6 @@ local function saveExportedItems()
 end
 
 --[[
-    Get Exported Item Count
-    @desc   Get count of items currently exported (in transit)
-    @param  itemName - The item name to check
-    @return number - Count of items in transit
-]]
-local function getExportedItemCount(itemName)
-    if exportedItems[itemName] then
-        return exportedItems[itemName].count
-    end
-    return 0
-end
-
---[[
     Add Exported Item
     @desc   Track an item that was exported to the output chest
     @param  itemName - The item being exported
@@ -866,9 +873,9 @@ end
 local function addExportedItem(itemName, count)
     if exportedItems[itemName] then
         exportedItems[itemName].count = exportedItems[itemName].count + count
-        exportedItems[itemName].timestamp = os.clock()
+        exportedItems[itemName].timestamp = os.epoch("utc")
     else
-        exportedItems[itemName] = { count = count, timestamp = os.clock() }
+        exportedItems[itemName] = { count = count, timestamp = os.epoch("utc") }
     end
     saveExportedItems()
     logMessage("DEBUG", "Added exported item", { item = itemName, count = count, total = exportedItems[itemName].count })
@@ -906,34 +913,117 @@ local function getTotalExportedCount()
 end
 
 --[[
+    Request Item Names
+    @desc   All item names that can satisfy a request: the requested item plus every
+            alternative MineColonies accepts (e.g. any boots within the level range)
+    @param  data - Request record
+    @return table - Set of item names
+]]
+local function requestItemNames(data)
+    local names = {}
+    if data.item and data.item.name then names[data.item.name] = true end
+    for name in pairs(data.acceptedItems or {}) do names[name] = true end
+    return names
+end
+
+--[[
+    Take Budget
+    @desc   Claim up to `amount` of an item's tracked count for one request during this scan,
+            so two requests for the same item don't both count the same in-transit/pending items
+    @param  budget - Per-scan budget table
+    @param  source - exportedItems or pendingCrafts
+    @param  itemName - The item name
+    @param  amount - How many this request still needs
+    @return number - How many were claimed
+]]
+local function takeBudget(budget, source, itemName, amount)
+    if budget[itemName] == nil then
+        budget[itemName] = source[itemName] and source[itemName].count or 0
+    end
+    local taken = math.max(0, math.min(budget[itemName], amount))
+    budget[itemName] = budget[itemName] - taken
+    return taken
+end
+
+--[[
+    Take In Transit
+    @desc   How much of a request is already exported and waiting in the warehouse
+    @param  data - Request record
+    @return number - Items already in transit for this request
+]]
+local function takeInTransit(data)
+    local taken = 0
+    for name in pairs(requestItemNames(data)) do
+        if taken >= (data.needed or 0) then break end
+        taken = taken + takeBudget(scanTransitBudget, exportedItems, name, (data.needed or 0) - taken)
+    end
+    return taken
+end
+
+--[[
+    Requested Item Totals
+    @desc   Total amount requested per item name across all open requests
+    @param  currentRequests - List of current colony requests
+    @return table - item name -> total needed
+]]
+local function requestedItemTotals(currentRequests)
+    local totals = {}
+    for _, req in ipairs(currentRequests) do
+        for name in pairs(requestItemNames(req)) do
+            totals[name] = (totals[name] or 0) + (req.needed or 0)
+        end
+    end
+    return totals
+end
+
+--[[
+    Reconcile Pending Crafts
+    @desc   Forget crafts for items no open request needs anymore (the request was filled
+            some other way). Whatever AE2 crafts simply stays in the ME system.
+    @param  currentRequests - List of current colony requests
+    @return void
+]]
+local function reconcilePendingCrafts(currentRequests)
+    local requestedItems = requestedItemTotals(currentRequests)
+    local changed = false
+    for itemName, craftInfo in pairs(pendingCrafts) do
+        if not requestedItems[itemName] then
+            pendingCrafts[itemName] = nil
+            changed = true
+            logMessage("INFO", "Dropped pending craft - no open request needs it", { item = itemName, count = craftInfo.count })
+        end
+    end
+    if changed then savePendingCrafts() end
+end
+
+--[[
     Reconcile Exported Items
     @desc   Compare current requests with exported items - if request is gone, items were delivered
     @param  currentRequests - List of current colony requests
     @return void
 ]]
 local function reconcileExportedItems(currentRequests)
-    -- Build a set of currently requested items
-    local requestedItems = {}
-    for _, req in ipairs(currentRequests) do
-        if req.item and req.item.name then
-            if not requestedItems[req.item.name] then
-                requestedItems[req.item.name] = 0
-            end
-            requestedItems[req.item.name] = requestedItems[req.item.name] + req.needed
-        end
-    end
+    local requestedItems = requestedItemTotals(currentRequests)
+    local now = os.epoch("utc")
     
     -- Check each exported item - if no longer requested, assume delivered
     local toRemove = {}
+    local changed = false
     for itemName, exportInfo in pairs(exportedItems) do
         if not requestedItems[itemName] or requestedItems[itemName] == 0 then
             -- Request is gone - items were delivered
             table.insert(toRemove, itemName)
             logMessage("INFO", "Exported item confirmed delivered (request fulfilled)", { item = itemName, count = exportInfo.count })
+        elseif now - (exportInfo.timestamp or now) > IN_TRANSIT_TIMEOUT * 1000 then
+            -- Nothing was picked up for a long time - assume the items are gone and allow a re-export
+            table.insert(toRemove, itemName)
+            logMessage("WARN", "Exported items not picked up in time - allowing re-export", { item = itemName, count = exportInfo.count })
         elseif requestedItems[itemName] < exportInfo.count then
             -- Request reduced - partial delivery
             local delivered = exportInfo.count - requestedItems[itemName]
             exportInfo.count = requestedItems[itemName]
+            exportInfo.timestamp = now
+            changed = true
             logMessage("INFO", "Exported item partially delivered", { item = itemName, delivered = delivered, remaining = exportInfo.count })
         end
     end
@@ -943,40 +1033,31 @@ local function reconcileExportedItems(currentRequests)
         exportedItems[itemName] = nil
     end
     
-    if #toRemove > 0 then
+    if #toRemove > 0 or changed then
         saveExportedItems()
     end
 end
 
 --[[
-    Calculate True Deficit
-    @desc   Calculate how many items are truly needed after accounting for ME inventory and pending crafts
+    Calculate Craft Deficit
+    @desc   How many items to craft for a request, after accounting for what is still in the
+            ME system and crafts already running for it. In-transit items are excluded by the
+            caller (amount is what this request still has to send).
     @param  itemName - The item name
-    @param  needed - How many the colony request needs
-    @return number - True deficit that needs to be crafted
+    @param  amount - How many this request still needs to send
+    @return number - Amount that needs to be crafted
 ]]
-local function calculateTrueDeficit(itemName, needed)
-    -- Check what's already in ME system
+local function calculateCraftDeficit(itemName, amount)
     local inME = getMEInventoryCount(itemName)
+    local missing = math.max(0, amount - inME)
+    local pending = takeBudget(scanPendingBudget, pendingCrafts, itemName, missing)
+    local deficit = missing - pending
     
-    -- Check what's already pending in crafts
-    local pending = getPendingCraftCount(itemName)
-    
-    -- Check what's already exported (in transit to warehouse)
-    local exported = getExportedItemCount(itemName)
-    
-    -- Calculate true deficit
-    local available = inME + pending + exported
-    local deficit = needed - available
-    
-    if deficit < 0 then deficit = 0 end
-    
-    logMessage("DEBUG", "Calculated true deficit", { 
+    logMessage("DEBUG", "Calculated craft deficit", { 
         item = itemName, 
-        needed = needed, 
+        amount = amount, 
         inME = inME, 
         pending = pending,
-        exported = exported,
         deficit = deficit 
     })
     
@@ -1286,6 +1367,7 @@ end
     @param  bridge - ME Bridge peripheral
     @param  direction - Export direction
     @return number - Amount provided
+    @return string|nil - Item that was exported
 ]]
 function trySmartToolFulfillment(request, bridge, direction)
   if not SMART_TOOL_HANDLING then return 0 end
@@ -1322,7 +1404,7 @@ function trySmartToolFulfillment(request, bridge, direction)
   
   -- Try each alternative until one works
   for _, itemName in ipairs(alternatives) do
-    local exportItem = { name = itemName, count = request.needed }
+    local exportItem = { name = itemName, count = request.toSend or request.needed }
     local success, result = pcall(function() 
       return bridgeExport(exportItem, direction) 
     end)
@@ -1341,7 +1423,7 @@ function trySmartToolFulfillment(request, bridge, direction)
           provided = itemName, 
           count = provided 
         })
-        return provided
+        return provided, itemName
       end
     end
   end
@@ -1356,6 +1438,7 @@ end
     @param  bridge - ME Bridge peripheral
     @param  direction - Export direction
     @return number - Amount provided
+    @return string|nil - Item that was exported
 ]]
 function trySmartArmorFulfillment(request, bridge, direction)
   if not SMART_TOOL_HANDLING then return 0 end
@@ -1389,7 +1472,7 @@ function trySmartArmorFulfillment(request, bridge, direction)
   
   -- Try each alternative until one works
   for _, itemName in ipairs(alternatives) do
-    local exportItem = { name = itemName, count = request.needed }
+    local exportItem = { name = itemName, count = request.toSend or request.needed }
     local success, result = pcall(function() 
       return bridgeExport(exportItem, direction) 
     end)
@@ -1408,7 +1491,7 @@ function trySmartArmorFulfillment(request, bridge, direction)
           provided = itemName, 
           count = provided 
         })
-        return provided
+        return provided, itemName
       end
     end
   end
@@ -1791,7 +1874,7 @@ function displayPendingWarningPage(mon)
     end
     mon.setCursorPos(1, 2)
     mon.setTextColor(colors.white)
-    local warningTitle = "!! STORAGE OUTPUT WARNING !!"
+    local warningTitle = "!! CRAFTING WARNING !!"
     mon.setCursorPos(math.floor((w - #warningTitle) / 2) + 1, 2)
     mon.write(warningTitle)
     mon.setBackgroundColor(colors.black)
@@ -1801,10 +1884,10 @@ function displayPendingWarningPage(mon)
     -- Warning message
     mon.setTextColor(colors.orange)
     mon.setCursorPos(2, row)
-    mon.write("Items have been crafted but NOT exported!")
+    mon.write("Crafts were requested " .. math.floor(PENDING_WARNING_SECONDS / 60) .. "+ min ago")
     row = row + 1
     mon.setCursorPos(2, row)
-    mon.write("The output chest may be blocked or full.")
+    mon.write("but the items never showed up in the ME system.")
     row = row + 2
     
     -- Instructions
@@ -1814,13 +1897,13 @@ function displayPendingWarningPage(mon)
     row = row + 1
     mon.setTextColor(colors.white)
     mon.setCursorPos(4, row)
-    mon.write("1. ME Bridge output chest is connected")
+    mon.write("1. AE2 Crafting Status - is the job running?")
     row = row + 1
     mon.setCursorPos(4, row)
-    mon.write("2. Items can flow to MineColonies warehouse")
+    mon.write("2. Ingredients and free Crafting CPUs")
     row = row + 1
     mon.setCursorPos(4, row)
-    mon.write("3. No pipe/hopper blockages")
+    mon.write("3. Clears by itself once items arrive")
     row = row + 2
     
     -- List stuck items
@@ -1968,6 +2051,13 @@ function displayLegendPage(mon)
     mon.write("[CP]")
     mon.setTextColor(colors.white)
     mon.write(" - Waiting for a free Crafting CPU")
+    row = row + 1
+    
+    mon.setCursorPos(2, row)
+    mon.setTextColor(colors.lightBlue)
+    mon.write("[->]")
+    mon.setTextColor(colors.white)
+    mon.write(" - In warehouse, waiting for pickup")
     row = row + 1
     
     mon.setCursorPos(2, row)
@@ -2277,6 +2367,9 @@ function displayList(mon, listName, itemList)
       elseif record.status == "partial_fail" then
           statusIcon = "[!>] "
           statusColor = colors.orange
+      elseif record.status == "in_transit" then
+          statusIcon = "[->] "
+          statusColor = colors.lightBlue
       elseif record.status == "waiting_cpu" then
           statusIcon = "[CP] "
           statusColor = colors.magenta
@@ -2444,11 +2537,66 @@ function displayMainPage(mon, builder_list, nonbuilder_list, equipment_list, wor
   return buttons
 end
 
+--[[
+    Remote Screens
+    @desc   Package the latest scan results and send them to remote.lua over rednet
+]]
+local REMOTE_MAX_ITEMS = 40  -- per section, keeps wireless messages small
+local remoteSections = {}
+local remoteColonyName = nil
+
+local function setRemoteSections(builder, nonbuilder, equipment, workorder)
+  local function pack(title, list)
+    local items = {}
+    for i, rec in ipairs(list or {}) do
+      if i > REMOTE_MAX_ITEMS then break end
+      table.insert(items, { status = rec.status, provided = rec.provided, needed = rec.needed, name = rec.name, who = rec.colonist })
+    end
+    return { title = title, items = items, total = #(list or {}) }
+  end
+  remoteSections = {
+    pack("Builder Requests", builder),
+    pack("Nonbuilder Requests", nonbuilder),
+    pack("Equipment", equipment),
+    pack("Building Resources", workorder),
+  }
+end
+
+local function sendRemoteStatus(recipient)
+  if not wirelessModem then return end
+  if not remoteColonyName then
+    local ok, name = pcall(function() return colony.getColonyName() end)
+    remoteColonyName = (ok and type(name) == "string") and name or "Colony"
+  end
+  local message = {
+    type = "status",
+    colony = remoteColonyName,
+    time = os.time(),
+    nextScan = (current_run and current_run > 0) and current_run or time_between_runs,
+    paused = isNightPaused,
+    pending = getTotalPendingCount(),
+    transit = getTotalExportedCount(),
+    warning = pendingCraftsWarning and pendingCraftsWarningItems or nil,
+    sections = remoteSections,
+  }
+  local ok, err = pcall(function()
+    if recipient then
+      rednet.send(recipient, message, REMOTE_PROTOCOL)
+    else
+      rednet.broadcast(message, REMOTE_PROTOCOL)
+    end
+  end)
+  if not ok then
+    logMessage("WARN", "Failed to send remote status", { error = tostring(err) })
+  end
+end
+
 -- Color References:
 -- RED:     Export and craft both failed (item not in storage and no pattern available).
 -- ORANGE:  Partial export succeeded but crafting failed (pattern not found).
 -- YELLOW:  Crafting job scheduled (either partial fulfillment or full crafting).
 -- GREEN:   Order fully filled from existing storage.
+-- LIGHT BLUE: Already exported, waiting in the warehouse for pickup.
 -- BLUE:    Player needs to manually fill the order (equipment, Compostables, Fuel, Food, etc.).
 --[[
     Scan Work Requests
@@ -2460,9 +2608,6 @@ function scanWorkRequests(mon, bridge, direction)
     
     print("\nScan starting at", textutils.formatTime(os.time(), false) .. " (" .. os.time() ..").")
     logMessage("INFO", "=== SCAN STARTED ===", { time = os.time(), day = os.day() })
-    
-    -- Check for stuck pending crafts and trigger warning if needed
-    checkPendingCraftsWarning()
     
     statsData.totalScans = statsData.totalScans + 1
     statsData.lastScanTime = os.time()
@@ -2489,6 +2634,11 @@ function scanWorkRequests(mon, bridge, direction)
     
     -- Reconcile exported items - remove tracking for items that have been delivered
     reconcileExportedItems(allRequests)
+    -- Forget crafts nobody needs anymore, then check for crafts that are stuck
+    reconcilePendingCrafts(allRequests)
+    checkPendingCraftsWarning()
+    scanTransitBudget = {}
+    scanPendingBudget = {}
     
     logMessage("INFO", "Processing combined requests", { citizen = #requestList, workOrders = #workOrderResourceList, total = #allRequests })
     
@@ -2498,8 +2648,20 @@ function scanWorkRequests(mon, bridge, direction)
         local status = "pending"  -- Track status: done, partial, crafting, failed, partial_fail, manual
 
         local canProcess, itemType = processWorkRequestItem(data)
-        
+
+        -- Items exported on earlier scans may still be waiting in the warehouse for a
+        -- courier or builder; only send what isn't already on its way
+        local inTransit = 0
         if canProcess then
+            inTransit = takeInTransit(data)
+            data.toSend = (data.needed or 0) - inTransit
+        end
+        
+        if canProcess and data.toSend <= 0 then
+            status = "in_transit"
+            color = colors.lightBlue
+            logMessage("DEBUG", "Request already exported, waiting for pickup", { item = data.name, inTransit = inTransit })
+        elseif canProcess then
             local requestInfo = { name = data.name, needed = data.needed, type = data.requestType, itemType = itemType }
             if data.colonist then
                 requestInfo.requestedBy = data.colonist.fullName
@@ -2513,16 +2675,22 @@ function scanWorkRequests(mon, bridge, direction)
             
             -- Use smart fulfillment for tools and armor
             if itemType == "tool" and SMART_TOOL_HANDLING then
-                provided = trySmartToolFulfillment(data, bridge, direction)
+                local smartItem
+                provided, smartItem = trySmartToolFulfillment(data, bridge, direction)
                 if provided > 0 then
                     success = true
                     result = provided
+                    -- Track the item that actually went out (may differ from the first listed item)
+                    data.item = { name = smartItem, count = provided }
                 end
             elseif itemType == "armor" and SMART_TOOL_HANDLING then
-                provided = trySmartArmorFulfillment(data, bridge, direction)
+                local smartItem
+                provided, smartItem = trySmartArmorFulfillment(data, bridge, direction)
                 if provided > 0 then
                     success = true
                     result = provided
+                    -- Track the item that actually went out (may differ from the first listed item)
+                    data.item = { name = smartItem, count = provided }
                 end
             end
             
@@ -2534,7 +2702,7 @@ function scanWorkRequests(mon, bridge, direction)
                     local okCraftable, craftable = pcall(function() return bridgeIsCraftable({ name = candidate }) end)
                     if okCraftable and craftable then
                         logMessage("INFO", "Using cheapest craftable item for equipment request", { request = data.name, item = candidate })
-                        data.item = { name = candidate, count = data.needed }
+                        data.item = { name = candidate, count = data.toSend }
                         break
                     end
                 end
@@ -2552,6 +2720,7 @@ function scanWorkRequests(mon, bridge, direction)
                 if currentInME > 0 then
                     -- Items still available - proceed with export
                     -- Wrap exportItem in pcall to prevent crashes from peripheral disconnects
+                    data.item.count = data.toSend
                     success, result, err = pcall(function() return bridgeExport(data.item, direction) end)
                     if not success then
                         -- pcall failed - peripheral error
@@ -2576,7 +2745,7 @@ function scanWorkRequests(mon, bridge, direction)
                     
                     if data.item and data.item.name then
                         -- Calculate true deficit for the full amount needed
-                        local trueDeficit = calculateTrueDeficit(data.item.name, data.needed)
+                        local trueDeficit = calculateCraftDeficit(data.item.name, data.toSend)
                         
                         if trueDeficit > 0 then
                             local craftFilter = { name = data.item.name, count = trueDeficit }
@@ -2632,11 +2801,11 @@ function scanWorkRequests(mon, bridge, direction)
                 end
                 
                 -- If we didn't fulfill the full request, try to craft the remainder
-                if provided < data.needed and data.item.name then
-                    local remaining = data.needed - provided
+                if provided < data.toSend and data.item.name then
+                    local remaining = data.toSend - provided
                     
                     -- Calculate true deficit (accounts for items in ME and pending crafts)
-                    local trueDeficit = calculateTrueDeficit(data.item.name, remaining)
+                    local trueDeficit = calculateCraftDeficit(data.item.name, remaining)
                     
                     if trueDeficit > 0 then
                         local craftFilter = { name = data.item.name, count = trueDeficit }
@@ -2678,7 +2847,7 @@ function scanWorkRequests(mon, bridge, direction)
                         color = colors.yellow
                         status = "crafting"
                     end
-                elseif provided >= data.needed then
+                elseif provided >= data.toSend then
                     logMessage("INFO", "Request fully satisfied from storage", { item = data.name, provided = provided })
                     color = colors.green
                     status = "done"
@@ -2692,7 +2861,7 @@ function scanWorkRequests(mon, bridge, direction)
                 -- Export failed, try crafting the full amount
                 if data.item.name then
                     -- Calculate true deficit (accounts for items in ME and pending crafts)
-                    local trueDeficit = calculateTrueDeficit(data.item.name, data.needed)
+                    local trueDeficit = calculateCraftDeficit(data.item.name, data.toSend)
                     
                     if trueDeficit > 0 then
                         local craftFilter = { name = data.item.name, count = trueDeficit }
@@ -2789,7 +2958,8 @@ function scanWorkRequests(mon, bridge, direction)
             end
         end
           
-        newList = { name=listName, colonist=displayFor, requestFor=data.requestFor, needed=data.needed, provided=provided, color=color, status=status}
+        local shownProvided = math.min(data.needed or 0, (provided or 0) + inTransit)
+        newList = { name=listName, colonist=displayFor, requestFor=data.requestFor, needed=data.needed, provided=shownProvided, color=color, status=status}
         
         if expectedList == "WorkOrder" then
             table.insert(workorder_list, newList)
@@ -2815,6 +2985,9 @@ function scanWorkRequests(mon, bridge, direction)
   print("Scan completed at", textutils.formatTime(os.time(), false) .. " (" .. os.time() ..").") 
   logMessage("INFO", "=== SCAN COMPLETED ===", summary)
   flushLog()  -- Flush all buffered log writes at end of scan
+
+  setRemoteSections(builder_list, nonbuilder_list, equipment_list, workorder_list)
+  sendRemoteStatus()
   
   return builder_list, nonbuilder_list, equipment_list, workorder_list
 end
@@ -3053,6 +3226,7 @@ local function handleTerminalMenu()
             local _, confirmKey = os.pullEvent("key")
             if confirmKey == keys.y then
                 clearPendingCraftsWarning()
+                sendRemoteStatus()
                 print("Tracking data cleared.")
             else
                 print("Cancelled.")
@@ -3135,6 +3309,36 @@ while true do
     end
     TIMER = os.startTimer(1)
     
+  elseif e[1] == "rednet_message" and e[4] == REMOTE_PROTOCOL then
+    -- Commands from remote screens (remote.lua)
+    local sender, message = e[2], e[3]
+    local command = type(message) == "table" and message.command
+    if command == "status" then
+      sendRemoteStatus(sender)
+    elseif command == "refresh" then
+      logMessage("INFO", "Remote refresh requested", { from = sender })
+      os.cancelTimer(TIMER)
+      current_run = time_between_runs
+      builder_list, nonbuilder_list, equipment_list, workorder_list = scanWorkRequests(monitor, bridge, direction)
+      if pendingCraftsWarning then
+        currentPage = "warning"
+        currentButtons = displayPendingWarningPage(monitor)
+      elseif currentPage == "main" then
+        currentButtons = displayMainPage(monitor, builder_list, nonbuilder_list, equipment_list, workorder_list)
+        displayTimer(monitor, current_run)
+      end
+      TIMER = os.startTimer(1)
+    elseif command == "clear_warning" then
+      logMessage("INFO", "Remote cleared pending crafts warning", { from = sender })
+      clearPendingCraftsWarning()
+      if currentPage == "warning" then
+        currentPage = "main"
+        currentButtons = displayMainPage(monitor, builder_list, nonbuilder_list, equipment_list, workorder_list)
+        displayTimer(monitor, current_run)
+      end
+      sendRemoteStatus()
+    end
+    
   elseif e[1] == "key" then
     -- Handle keyboard input for terminal menu
     local key = e[2]
@@ -3151,6 +3355,7 @@ while true do
     if currentPage == "warning" then
       if currentButtons.clear_warning and isButtonClicked(currentButtons.clear_warning, clickX, clickY) then
         clearPendingCraftsWarning()
+        sendRemoteStatus()
         currentPage = "main"
         currentButtons = displayMainPage(monitor, builder_list, nonbuilder_list, equipment_list, workorder_list)
         displayTimer(monitor, current_run)

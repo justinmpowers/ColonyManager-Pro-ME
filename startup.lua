@@ -2,7 +2,7 @@
 -- Auto-generated startup file for boot configuration
 -- This file runs ColonyManager-Pro-ME on computer boot with auto-update checking
 
-local VERSION = "2.0.0"
+local VERSION = "2.1.0"
 
 -- Print startup banner
 term.clear()
