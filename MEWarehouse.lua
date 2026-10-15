@@ -701,21 +701,6 @@ local function checkPendingCraftsWarning()
 end
 
 --[[
-    Clear Pending Crafts Warning
-    @desc   User acknowledged the warning - clear all pending crafts and exported items
-    @return void
-]]
-local function clearPendingCraftsWarning()
-    pendingCrafts = {}
-    exportedItems = {}
-    pendingCraftsWarning = false
-    pendingCraftsWarningItems = {}
-    savePendingCrafts()
-    saveExportedItems()
-    logMessage("INFO", "Pending crafts warning cleared by user - all tracking reset")
-end
-
---[[
     Get Total Pending Count
     @desc   Get total count of items pending in crafts
     @return number
@@ -872,6 +857,22 @@ local function saveExportedItems()
     local file = fs.open(EXPORTED_ITEMS_FILE, "w")
     file.write(textutils.serialize(exportedItems))
     file.close()
+end
+
+--[[
+    Clear Pending Crafts Warning
+    @desc   User acknowledged the warning - clear all pending crafts and exported items
+    @return void
+]]
+-- Defined after saveExportedItems so both save functions are in scope
+local function clearPendingCraftsWarning()
+    pendingCrafts = {}
+    exportedItems = {}
+    pendingCraftsWarning = false
+    pendingCraftsWarningItems = {}
+    savePendingCrafts()
+    saveExportedItems()
+    logMessage("INFO", "Pending crafts warning cleared by user - all tracking reset")
 end
 
 --[[
